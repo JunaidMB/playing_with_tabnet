@@ -29,9 +29,15 @@ torch_manual_seed(777)
 strand_pat <- NHSRdatasets::stranded_data %>% 
   setNames(c("stranded_class", "age", "care_home_ref_flag", "medically_safe_flag", 
              "hcop_flag", "needs_mental_health_support_flag", "previous_care_in_last_12_month", "admit_date", "frail_descrip")) %>% 
-  mutate(stranded_class = factor(stranded_class),
-         admit_date = as.Date(admit_date, format = "%d/%m/%Y")) %>% 
-  drop_na()
+  mutate(across(where(is.character),as.factor),
+         admit_date = as.Date(admit_date, format = "%d/%m/%Y"),
+         across(ends_with("flag"), as.logical)) 
+
+# Explore data ----
+## Analyse Class Imbalance
+class_bal_table <- table(strand_pat$stranded_class)
+prop_tab <- prop.table(class_bal_table)
+upsample_ratio <- class_bal_table[2]/ sum(class_bal_table)
 
 # Partition into training and test data splits ----
 split <- initial_split(strand_pat)
@@ -47,9 +53,8 @@ stranded_rec <-
   step_rm(admit_date) %>% 
   # Upsample minority (positive) class
   themis::step_upsample(stranded_class, over_ratio = as.numeric(upsample_ratio)) %>% 
-  step_dummy(all_nominal_predictors()) %>% 
   step_zv(all_predictors()) %>% 
-  step_normalize(all_predictors())
+  step_normalize(all_numeric_predictors())
 
 ## Prepare and Bake recipe on training and test data
 stranded_recipe_prep <- prep(stranded_rec, training = train_data)
@@ -58,7 +63,7 @@ stranded_train_bake <- bake(stranded_recipe_prep, new_data = NULL)
 stranded_test_bake <- bake(stranded_recipe_prep, new_data = test_data)
 
 # hyperparameter settings (apart from epochs) as per the TabNet paper (TabNet-S)
-tabnet_model <- tabnet(epochs = 5, batch_size = 256, decision_width = tune(), attention_width = tune(),
+tabnet_model <- tabnet(epochs = 5, batch_size = 300, decision_width = tune(), attention_width = tune(),
               num_steps = tune(), penalty = 0.000001, virtual_batch_size = 256, momentum = 0.6,
               feature_reusage = 1.5, learn_rate = tune()) %>%
   set_engine("torch", verbose = TRUE) %>%
